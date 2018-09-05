@@ -16,20 +16,28 @@ else [[ "$1" == "10" ]]
 fi
 
 package=MarkLogic-$1.0-`date +%Y%m%d`.x86_64.rpm
-wget --auth-no-challenge --no-check-certificate  ${URL}/${package} --directory-prefix=/tmp
 
-if [ ! -f "/tmp/$package" ]
+if [ -f ./$package ]  ; then
+	echo "Older RPM exist. Deleting them now..."
+	rm -rf ./$package
+else 
+	echo -e "\n----->No previous RPM exist"
+fi
+
+wget --auth-no-challenge --no-check-certificate  ${URL}/${package} --directory-prefix= .
+
+if [ ! -f "./$package" ]
         then
          echo "ERROR : Package file download failed"
          echo "--- Exiting the script ---"
          exit -1
         fi
-        chmod 777 /tmp/$package
-        echo -e "\nPackage file downloaded : /tmp/$package"
+        chmod 777 ./$package
+        echo -e "\nPackage file downloaded : $PWD/$package"
 
 
 echo "----->Completed RPM download. Proceeding with Docker File Creation"
-sed -i -e 's/MarkLogic.rpm/'$package'/g' ./Dockerfile
+#sed -i -e 's/MarkLogic*/'$package'/g' ./Dockerfile
 echo -e "\n----->Completed Docker File creation. Proceeding with Image creation"
 
 
@@ -48,8 +56,8 @@ echo -e "\nPre-req2: Checking existence of Dockerfile"
 [ -f ./Dockerfile ] && echo "[SUCCESS]: Docker File exists at $PWD" || echo "File does not exist Hence exiting"
 
 echo -e  "\nPre-req3: Checking existence of Marklogic RPM"
-if [ -f "/tmp/$package" ]; then
-	echo "[SUCCESS]: Marklogic RPM Exists at /tmp/$package"
+if [ -f "./$package" ]; then
+	echo "[SUCCESS]: Marklogic RPM Exists at ./$package"
 else 
 	echo "File does not Exist"
 fi
@@ -90,7 +98,7 @@ else
 fi
 
 container_name="$Image_name-container"
-echo -e "\n----->Creating containers for the images created:$containter_name"
+echo -e "\n----->Creating containers for the images created:$container_name"
 containter_status=$(sudo docker ps -a | grep $container_name | wc -l)
 
 if [ "$containter_status" == "1" ] ; then
