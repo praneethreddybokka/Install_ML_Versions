@@ -17,12 +17,15 @@ fi
 
 package=MarkLogic-$1.0-`date +%Y%m%d`.x86_64.rpm
 
-if [ -f ./$package ]  ; then
+if [ -f ./MarkLogic.rpm ]  ; then
 	echo "Older RPM exist. Deleting them now..."
-	rm -rf ./$package
+	rm -rf ./MarkLogic.rpm
 else 
 	echo -e "\n----->No previous RPM exist"
 fi
+
+
+
 
 wget --auth-no-challenge --no-check-certificate  ${URL}/${package} --directory-prefix= .
 
@@ -32,9 +35,9 @@ if [ ! -f "./$package" ]
          echo "--- Exiting the script ---"
          exit -1
         fi
-        chmod 777 ./$package
         echo -e "\nPackage file downloaded : $PWD/$package"
-
+	mv $PWD/$package ./MarkLogic.rpm
+	chmod -R 777 ./MarkLogic.rpm
 
 echo "----->Completed RPM download. Proceeding with Docker File Creation"
 #sed -i -e 's/MarkLogic*/'$package'/g' ./Dockerfile
@@ -50,16 +53,19 @@ if [[ $(which docker) && $(sudo docker --version) ]]; then
 	echo "[SUCCESS]: Docker is installed"
 else
 	echo "[FAIL]: Docker is not installed on this Host"
+	exit 0
 fi
 
 echo -e "\nPre-req2: Checking existence of Dockerfile"
-[ -f ./Dockerfile ] && echo "[SUCCESS]: Docker File exists at $PWD" || echo "File does not exist Hence exiting"
+[ -f ./Dockerfile ] && echo "[SUCCESS]: Docker File exists at $PWD" || echo "File does not exist Hence exiting" exit 0
+
 
 echo -e  "\nPre-req3: Checking existence of Marklogic RPM"
-if [ -f "./$package" ]; then
-	echo "[SUCCESS]: Marklogic RPM Exists at ./$package"
+if [ -f "./MarkLogic.rpm" ]; then
+	echo "[SUCCESS]: Marklogic RPM Exists at $pwd/MarkLogic.rpm"
 else 
 	echo "File does not Exist"
+	exit 0 
 fi
 
 echo -e "Completed Pre-req's... Proceeding with Image Creation....\n"
@@ -108,10 +114,15 @@ if [ "$containter_status" == "1" ] ; then
 fi
 
 
-Container_output=$(sudo docker run -d --name=$container_name -p $p1:8001 -p $p2:8002 $Image_name)
+Container_output=$(sudo docker run -d --name=$container_name -p $p1:8000 -p $p2:8001 $Image_name)
 if [ "$?" == "0" ] ; then
         echo "Container is created"
 else
         echo "Failure while creating containers"
         echo "Output while creating Containers: $Container_output"
+	exit 1;
 fi
+
+echo -e "\n Containter is created with the ML server installed"
+echo -e  "\n Proceeding with ML initializing"
+[$(sudo docker exec -it  $container_name /bin/sh -c "mladmin start;init-marklogic")] && echo -e "\n ML server is initialized and ready to use" || echo -e "\n ML initialization failed"

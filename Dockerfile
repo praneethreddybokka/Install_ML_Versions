@@ -13,10 +13,12 @@ RUN yum -y install initscripts && yum clean all
 ENV PATH /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/MarkLogic/mlcmd/bin
 
 # Copy the MarkLogic installer to a temp directory in the Docker image being built
-COPY MarkLogic-10.0-20180904.x86_64.rpm /tmp/MarkLogic-9.0-20180904.x86_64.rpm
+COPY MarkLogic.rpm /tmp/MarkLogic.rpm
+COPY init-marklogic /usr/local/sbin/
+COPY mladmin /usr/local/sbin
 
 # Install MarkLogic then delete the .RPM file if the install succeeded
-RUN yum -y install /tmp/MarkLogic-9.0-20180904.x86_64.rpm && rm /tmp/MarkLogic-9.0-20180904.x86_64.rpm
+RUN yum -y install /tmp/MarkLogic.rpm && rm /tmp/MarkLogic.rpm
 
 # Expose MarkLogic Server ports
 # Also expose any ports your own MarkLogic App Servers use such as
