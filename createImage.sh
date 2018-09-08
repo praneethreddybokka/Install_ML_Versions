@@ -125,4 +125,4 @@ fi
 
 echo -e "\n Containter is created with the ML server installed"
 echo -e  "\n Proceeding with ML initializing"
-[$(sudo docker exec -it  $container_name /bin/sh -c "mladmin start;init-marklogic")] && echo -e "\n ML server is initialized and ready to use" || echo -e "\n ML initialization failed"
+[$(sudo docker exec -i  $container_name /bin/sh -c "mladmin start;init-marklogic")] && echo -e "\n ML server is initialized and ready to use" || echo -e "\n ML initialization failed"
