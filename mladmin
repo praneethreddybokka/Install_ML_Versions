@@ -1,0 +1,1060 @@
+#!/bin/bash 
+#
+
+start() {
+        if [ -f /etc/init.d/$MLServer ]; then
+            /etc/init.d/$MLServer start
+        elif [ -f ~/Library/StartupItems/MarkLogic/MarkLogic ]; then
+            ~/Library/StartupItems/MarkLogic/MarkLogic start
+        else
+         echo "MarkLogic Server is not installed on this machine"
+        fi
+}
+stop() {
+	if [ -f /etc/init.d/MarkLogic ]; then
+	 /etc/init.d/MarkLogic stop
+	fi
+	if [ -f /etc/init.d/MarkCIS ]; then
+	 /etc/init.d/MarkCIS stop
+	fi
+        if [ -f ~/Library/StartupItems/MarkLogic/MarkLogic ]; then
+            killall MarkLogic
+            ~/Library/StartupItems/MarkLogic/MarkLogic stop
+        fi
+}
+status() {
+        if [ "$OS" = "Darwin" ]; then
+             ps ax | grep MarkLogic | grep -v grep &> /dev/null
+             if [ $? -eq 0 ] ; then 
+                 echo MarkLogic server is running
+             else
+                 echo MarkLogic server is stopped
+             fi
+        else
+	/etc/init.d/$MLServer status
+        fi
+}
+restart() {
+        if [ "$OS" = "Darwin" ]; then
+            ~/Library/StartupItems/MarkLogic/MarkLogic restart
+        else
+	    /etc/init.d/$MLServer restart
+        fi
+}
+abort() {
+        if [ "$OS" = "Darwin" ]; then
+            killall MarkLogic
+        else
+	    /etc/init.d/$MLServer abort
+        fi
+}
+remove() {
+	if [ "$OS" = "Linux" ]; then
+	 echo "Uninstall MarkLogic Server(`rpm -q $ML`) ..."
+	 rpm -ev $ML
+	elif [ "$OS" = "SunOS" ]; then
+	 /bin/pkginfo -q $ML
+	 RETVAL=$?
+	 if [ $RETVAL -eq 0 ]; then
+	    echo "Uninstall MarkLogic Server(`/bin/pkginfo -l $ML |grep VERSION`)..."
+	    /usr/sbin/pkgrm -n $ML
+	 fi
+        elif [ "$OS" = "Darwin" ]; then
+            MARKLOGIC_MANIFEST=~/Library/MarkLogic/manifest.txt
+            if [ -r $MARKLOGIC_MANIFEST ]; then
+               echo Uninstalling using manifest: $MARKLOGIC_MANIFEST
+               # Make a copy, because the manifest gets deleted while we are reading it
+               cp $MARKLOGIC_MANIFEST /tmp/manifest$$.txt
+               (
+                 cd
+                 cat /tmp/manifest$$.txt | while read f 
+                    do rm -fd $f
+                 done
+               )
+               rm -f /tmp/manifest$$.txt
+            else
+               echo Uninstalling by deleting directories
+               rm -rf ~/Library/MarkLogic
+               rm -rf ~/Library/PreferencePanes/MarkLogic.prefPane
+               rm -rf ~/Library/StartupItems/MarkLogic
+            fi
+	fi
+}
+install() {
+        if [ "$OS" = "Linux" ]; then
+         rpm -iv $pkg
+        elif [ "$OS" = "SunOS" ]; then
+         /bin/rm -rf /tmp/pkg
+	 mkdir -m ugo+rwx /tmp/pkg
+         /bin/rm -rf /tmp/pkg/$ML*tar* /tmp/pkg/$ML
+         cp $pkg /tmp/pkg
+         /usr/bin/uncompress /tmp/pkg/$ML*.Z
+         cd /tmp/pkg; tar xf $ML*.tar
+         if [ -d $MLHome ]; then
+           find $MLHome -type d -print | xargs chgrp root
+           find $MLHome -type d -print | xargs chmod g-ws
+         fi
+         /usr/sbin/pkgadd -d /tmp/pkg -n $ML
+         /bin/pkginfo -l $ML
+	 cd /tmp; /bin/rm -rf /tmp/pkg
+        elif [ "$OS" = "Darwin" ]; then
+            PKG=`echo $pkg | sed s/dmg$/pkg/`
+            attach=`hdiutil attach $pkg | tail -1 | awk '{ print $3;}'`
+            attach=${attach:-/Volumes/MarkLogic}
+            PKG=`basename $PKG`
+            installer -pkg $attach/$PKG -target /
+            hdiutil detach $attach
+        fi
+}
+add-javahome() {
+        grep "^JAVA_HOME=" /etc/marklogic.conf &> /dev/null
+        if [ $? -ne 0 ]; then 
+         echo "JAVA_HOME=${value}" >> /etc/marklogic.conf
+        else
+         cat /etc/marklogic.conf | sed "s/JAVA_HOME=.*/JAVA_HOME=${value}/g" > /tmp/$$.tmp
+         cp -f /tmp/$$.tmp /etc/marklogic.conf
+         rm -f /tmp/$$.tmp
+        fi
+}
+remove-javahome() {
+        grep "^JAVA_HOME=" /etc/marklogic.conf &> /dev/null
+        if [ $? -eq 0 ]; then 
+         if [ `wc -l /etc/marklogic.conf| awk '{print $1;}'` -eq 1 ] ; then 
+           rm -f /etc/marklogic.conf
+         else
+          sed "/JAVA_HOME=.*/d" /etc/marklogic.conf > /tmp/$$.tmp
+          cp -f /tmp/$$.tmp /etc/marklogic.conf
+          rm -f /tmp/$$.tmp
+         fi
+        fi
+}
+install-sql() {
+        if [ "$OS" = "Linux" ]; then
+         rpm -iv $pkg
+        fi
+}
+remove-sql() {
+	if [ "$OS" = "Linux" ]; then
+	 echo "Uninstall MarkLogic SQL Client(`rpm -q $MLSQL`) ..."
+	 rpm -ev $MLSQL
+	fi
+}
+setupperms() {
+	if [ -d $MLHome ]; then
+	  chgrp -R $1 "$MLHome"
+          chmod -R g+rw "$MLHome"
+	  #this should handle filenames with spaces too..
+	  #hack since -0 option is not working on solaris
+	  if [ "$OS" = "Linux" ] || [ "$OS" = "Darwin" ]; then
+           find "$MLHome" -type d -print0 | xargs -0 chmod g+rwxs
+	  elif [ "$OS" = "SunOS" ]; then
+	   find $MLHome -type d -exec chmod g+rwxs {} + -print
+	  fi
+	fi
+	if [ -d "$MLDHome" ]; then
+	  chgrp -R $1 "$MLDHome/"
+	  chmod -R g+rw "$MLDHome/"
+	fi
+        if [ -f "$MLDHome/assignments.xml" ]; then 
+            PrivateDir=`egrep 'large-data-directory|data-directory|fast-data-directory' "$MLDHome/assignments.xml" | cut -d'>' -f2 | cut -d'<' -f1| grep -v "^$" | grep -v '^hdfs:'| uniq`
+            if [ ! -z "$PrivateDir" ] ; then 
+                chgrp -R $1 $PrivateDir
+                chmod -R g+rw $PrivateDir
+            fi
+        fi
+}
+cleandata() {
+	echo "Clean up MarkLogic Data Directory ..."
+	/bin/rm -rf "$MLDHome/"*
+}
+removedata() {
+	echo "Clean up MarkLogic Data Directory ..."
+	/bin/rm -rf "$MLDHome/"
+}
+cleanmodules() {
+	/bin/rm -rf "$MLHome"/Modules/{functions,merge-module,regression-modules,testdriver-lib}.xqy
+}
+copy () {
+	base=`dirname $2`
+	if [ "$base" = "$MLDHome" ]; then
+		cp $1 $2
+	fi
+}
+lsof() {
+	echo `$PS aux | grep -i $MLHome/bin | grep -v grep | $AWK '{ print $2}'` | $LSOF -p `$SED 's/\ /,/'`
+}
+killprocs() {
+        if [ -z $2 ];then 
+	    $PS aux | grep -i $MLHome/bin | grep -v grep | kill -9 `$AWK '{ print $2}'`
+	    $PS aux | grep -i con | grep daemon | grep -v grep | kill -9 `$AWK '{ print $2}'` &> /dev/null
+        else
+            shift
+            for i in $*; do
+                $PS aux | grep $i | grep -v grep | grep daemon  &> /dev/null
+                if [ $? -eq 0 ]; then
+                    kill -9 $i
+                else
+                    echo " process id $i doesnot belongs to daemon user or doesn't exists"
+                fi
+            done
+        fi
+}
+clearSystemCache() {
+    if [ "$OS" = "SunOS" ]; then
+        echo "sysctl not supported on solaris"
+    else 
+        $SYNC && $SYSCTL vm.drop_caches=3
+    fi
+}
+pauseprocs() {
+	$PS aux | grep -i $MLHome/bin | grep daemon | grep -v grep | kill -STOP `$AWK '{ print $2}'`
+}
+resumeprocs() {
+	$PS aux | grep -i $MLHome/bin | grep daemon | grep -v grep | kill -CONT `$AWK '{ print $2}'`
+}
+deny-xdqp() {
+        inputRuleExists=`$IPTABLES -L INPUT | egrep "7998|7999"`
+        outputRuleExists=`$IPTABLES -L OUTPUT | egrep "7998|7999"`
+        if [ -z "$inputRuleExists" ]; then
+	$IPTABLES -A INPUT -p tcp -m tcp --dport 7998:7999 -j DROP
+	$IPTABLES -A INPUT -p tcp -m tcp --sport 7998:7999 -j DROP
+        fi
+        if [ -z "$outputRuleExists" ]; then
+        $IPTABLES -A OUTPUT -p tcp -m tcp --dport 7998:7999 -j DROP
+        $IPTABLES -A OUTPUT -p tcp -m tcp --sport 7998:7999 -j DROP
+        fi
+}
+show-iptables() {
+	$IPTABLES -L
+}
+edit-cron() {
+        crontab -u builder -e
+}
+show-cron() {
+	uniq_users=`for user in $(users /var/log/wtmp); do echo $user; done | sort | uniq`
+        for user in $uniq_users
+        do
+	cron_exists=`crontab -u $user -l 2>/dev/null`
+	if [ "$cron_exists" ]
+        then
+        echo "cronjobs for user $user: " 
+        crontab -u $user -l
+        echo " " 
+	fi
+        done
+	echo "Users looked up: "
+	echo "$uniq_users"
+}
+allow-xdqp() {
+        inputRuleExists=`$IPTABLES -L INPUT | egrep "7998|7999"`
+        outputRuleExists=`$IPTABLES -L OUTPUT | egrep "7998|7999"`
+        if [ "$inputRuleExists" ]; then
+	$IPTABLES -D INPUT -p tcp -m tcp --dport 7998:7999 -j DROP
+	$IPTABLES -D INPUT -p tcp -m tcp --sport 7998:7999 -j DROP
+        fi
+        if [ "$outputRuleExists" ]; then
+        $IPTABLES -D OUTPUT -p tcp -m tcp --dport 7998:7999 -j DROP
+        $IPTABLES -D OUTPUT -p tcp -m tcp --sport 7998:7999 -j DROP
+        fi
+}
+
+slink() {
+        if [ -d $MLDHome ]; then
+	  if [  -h $MLDHome ]; then
+	   rm $MLDHome
+	   if [ -d $1 ]; then
+	    ln -s $1 $MLDHome
+	   else
+            mkdir $1
+            ln -s $1 $MLDHome
+           fi
+          else
+           if [ ! -d $1/$ML ]; then
+	    if [ -d $1 ]; then
+	      mv $MLDHome $1/$ML
+	      ln -s $1/$ML $MLDHome
+	    else echo "$1 doesn't exist. Specify another directory"
+	    fi
+	   else echo "$1/$ML already exists. Specify another directory"
+           fi
+	  fi
+        elif [ -d $1 ]; then
+          ln -s $1 $MLDHome
+        else
+          mkdir $1
+          ln -s $1 $MLDHome
+        fi
+}
+
+
+replacemotd() {
+	if [ -f $1 ];  then
+	  cp $1 /etc/motd
+	else
+	  echo "unable to locate file: $1"
+	fi
+}
+
+pstack() {
+	if [ -f /etc/init.d/$MLServer ]; then
+	 /etc/init.d/$MLServer pstack
+	else 
+	 echo "MarkLogic Server is not installed on this machine"
+	fi
+}
+
+pmap() {
+        if [ -f /etc/init.d/$MLServer ]; then
+         /etc/init.d/$MLServer pmap
+        else
+         echo "MarkLogic Server is not installed on this machine"
+        fi
+}
+
+delete() {
+	if [ -e $1 ]; then
+	 OWNER=`ls -ld $1 | awk '{print $3}'`
+	 if [ "$OWNER" = "daemon" ]; then
+	 /bin/rm -r $1
+	 else
+	  echo "Specified dir or file is not owned by daemon: $1"
+	 fi
+	else
+	 echo "Unable to locate the specified directory or file: $1"
+	fi
+}
+
+update-hadoop-env() {
+	$1/update-hadoop-env.sh --hosts $2
+}
+
+recover-hadoop-env() {
+	$1/recover-hadoop-env.sh --hosts $2
+}
+
+hdp-start() {
+	$1/hdp-start.sh --hosts $2
+}
+
+hdp-stop() {
+	$1/hdp-stop.sh --hosts $2
+}
+
+change-sysdate() {
+	date "101010002013"
+	echo "system date changed"
+}
+
+sync-sysdate() {
+	  if [ "$OS" = "Darwin" ]; then
+	    ntpdate -u time.apple.com
+	  elif ["$OS" = "Linux"]; then
+	    ntpdate -s time.nist.gov
+	  else
+	    curl -sS http://www.earthtools.org/timezone/37.33/-121.8949 > /tmp/response.xml
+		response=$(xmllint --format --recover /tmp/response.xml)
+		echo $response
+		time=$(xmllint --xpath '/timezone/localtime/text()'  /tmp/response.xml)
+	    date -s "$time"
+	  fi
+}
+
+install-docker(){
+    if [ "$OS" = "Linux" ]; then
+      	sudo yum update
+      	curl -fsSL https://get.docker.com/ | sh
+      	sudo systemctl enable docker.service
+      	sudo systemctl start docker
+      	sudo systemctl enable docker
+      	sudo usermod -aG docker $(whoami)
+    	echo "docker installed successfully, you have to logout and login to use docker without sudo"
+    else
+    	echo "Error: can't install docker on this OS, Install docker manually."
+    fi
+	
+}
+
+update-cert(){
+    if [ "$OS" = "Linux" ]; then
+    	sudo mkdir -p /etc/docker/certs.d/mlregistry.marklogic.com  
+      	sudo curl -k https://mlregistry.marklogic.com/ca -o /etc/docker/certs.d/mlregistry.marklogic.com/ca.crt
+      	sudo /bin/systemctl restart docker.service
+    else
+    	echo "Error: can't update certificates on this OS, update certficates manually."
+    fi
+
+}
+
+pull-qa-image(){
+	docker create -v /space/qa_home --name qa_home_trunk mlregistry.marklogic.com/marklogic/qa_home /bin/bash
+}
+
+get-image() {
+	echo "pulling image $1"
+	docker pull "mlregistry.marklogic.com/$1" 
+}
+
+
+create-container(){
+    HELP="USAGE: mladmin create-container image=<image> <options>
+        required: image - docker image name 
+        options: name  - name for container (default - username.engrlab.marklogic.com)
+                 mount-qa=/path/to/qa  - mounts qa home on the container
+                 mount-home=true|false - mounts users home dir on the container
+                 same-ports=true|false - sets same container to host port mappings.
+                 setup-qa=true|false   - setup qa servers and databases for regression
+                 mount-qa-container=true - mount qa home container inside the container
+          "
+while [ "$1" != "" ]; do
+PARAM=`echo $1 | awk -F= '{print $1}'`
+VALUE=`echo $1 | awk -F= '{print $2}'`
+#echo "VALUE: $PARAM:$VALUE"
+
+case $PARAM in
+  -h | --help)
+    echo "$HELP"
+    exit
+    ;;
+    image)
+    IMAGE_NAME="mlregistry.marklogic.com/$VALUE"
+    ;;
+    name)
+    NAME="$VALUE"
+    ;;
+    mount-qa)
+    QA_PATH="$VALUE"
+    ;;
+    mount-home)
+    MOUNT_HOME="$VALUE"
+    ;;
+    same-ports)
+    SAME_PORTS="$VALUE"
+    ;;
+    setup-qa)
+    SETUP_QA="$VALUE"
+    ;;
+    mount-qa-container)
+    QA_CONTAINER="$VALUE"
+    ;;
+    *)
+      # unknown option
+      echo "ERROR: unknown parameter \"$PARAM\""
+      echo "$HELP"
+      exit 1
+    ;;
+esac
+shift
+done
+      
+ 
+    if [[ -z $IMAGE_NAME ]] ; then
+      echo "$HELP"
+      exit 0
+    fi
+
+    if [ "$QA_PATH" != "" ] && [ "$QA_CONTAINER" == true ]; then
+      echo "Can't mount qa home directory and qa home container at the same time"
+      exit 0
+    fi
+ 
+    if [ "$(docker network ls | grep -o 'docker-network')" == "docker-network" ]; then
+        echo "docker-network already exists"
+    else
+        echo "Creating docker-network"
+        docker network create -d bridge --subnet=172.20.0.0/16 --gateway=172.20.0.1 docker-network
+    fi
+
+
+    if [[ -z $NAME ]] ; then         
+      container_name="$(whoami)-$(date +%s | tail -c 5).engrlab.marklogic.com"
+    else
+      container_name="$NAME.engrlab.marklogic.com"
+    fi
+			
+		# This for windows, as container name does not support '+'
+		if [[ $container_name == *"+"* ]]
+		then
+		  container_name=$(echo $container_name | sed -e "s/\+/-/g")	
+		fi
+      
+    CMD="docker run --privileged -d --network=docker-network --hostname=$container_name --name=$container_name"
+      
+
+    if  [ -d "/project/engineering" ]; then
+        CMD="$CMD -v /project/engineering:/project/engineering"
+    fi
+
+    if [ "$SAME_PORTS" == true ]; then
+        CMD="$CMD -p 8000-8003:8000-8003 -p 8050:8050 -p 8055:8055 -p 6321:6321 -p 5073:5073 -p 5275:5275"
+    else         
+        CMD="$CMD -P"  
+    fi
+     
+    if [ "$QA_PATH" != "" ]; then
+        CMD="$CMD -v $QA_PATH:$QA_PATH"
+    fi
+
+    if [ "$QA_CONTAINER" == true ]; then
+        CMD="$CMD --volumes-from qa_home_trunk"
+    fi
+
+    if [ "$MOUNT_HOME" == true ]; then
+        CMD="$CMD -v $HOME:/home/$(whoami) "
+    fi
+    CMD="$CMD $IMAGE_NAME"
+    #echo "$CMD"
+    eval $CMD              
+    sleep 3
+
+    docker exec -it $container_name init-marklogic
+    sleep 3
+          # setup qa after container is created
+    if [ "$SETUP_QA"  == true ]; then
+      # make setup-qa.sh part of image
+      docker exec -it $container_name setup-qa
+    fi
+
+    if [ "$SETUP_QA"  == true ] && [ "$QA_PATH" != "" ] ; then
+      docker exec -it -u docker-user $container_name bash -c "cd $QA_PATH && make tests tname=foo"
+    fi
+    #if [ "$MOUNT_HOME" == true ]; then
+      # make setup-qa.sh part of image
+    #  docker exec -it $container_name qa-user-setup $(whaomi)
+    #fi
+    echo "created container $container_name"
+
+}
+
+create-cluster(){
+    HELP="USAGE: mladmin create-cluster image=<image> nodes=<nodes> <options>
+        required: image - docker image name
+                  nodes - number of nodes in the cluster
+        options: mount-qa=/path/to/qa  - mounts qa home on the container
+                 mount-home=true|false - mounts users home dir on the container
+                 same-ports=true|false - sets same container to host port mappings on the cluster. 8000->8000,8001->8001,8002->8002
+                 setup-qa=true|false   - setup qa servers and databases for regression
+                 mount-qa-container=true - mount qa home container inside the container
+          "
+while [ "$1" != "" ]; do
+PARAM=`echo $1 | awk -F= '{print $1}'`
+VALUE=`echo $1 | awk -F= '{print $2}'`
+#echo "VALUE: $PARAM:$VALUE"
+case $PARAM in
+  -h | --help)
+    echo "$HELP"
+    exit
+    ;;
+    image)
+    IMAGE_NAME="mlregistry.marklogic.com/$VALUE"
+    ;;
+    nodes)
+    NODES="$VALUE"
+    ;;
+    mount-qa)
+    QA_PATH="$VALUE"
+    ;;
+    mount-home)
+    MOUNT_HOME="$VALUE"
+    ;;
+    same-ports)
+    SAME_PORTS="$VALUE"
+    ;;
+    setup-qa)
+    SETUP_QA="$VALUE"
+    ;;
+    mount-qa-container)
+    QA_CONTAINER="$VALUE"
+    ;;
+    *)
+      # unknown option
+      echo "ERROR: unknown parameter \"$PARAM\""
+      echo "$HELP"
+      exit 1
+    ;;
+esac
+shift
+done
+      
+ 
+if [[ -z $IMAGE_NAME || -z $NODES ]] ; then
+  echo "$HELP"
+  exit 0
+fi
+
+if [ "$QA_PATH" != "" ] && [ "$QA_CONTAINER" == true ]; then
+  echo "Can't mount qa home directory and qa home container at the same time"
+  exit 0
+fi
+ 
+  if [ "$NODES" == "3" ] || [ "$NODES" == "5" ];then
+    if [ "$(docker network ls | grep -o 'docker-network')" == "docker-network" ]; then
+        echo "docker-network already exists"
+    else
+        echo "Creating docker-network"
+        docker network create -d bridge --subnet=172.20.0.0/16 --gateway=172.20.0.1 docker-network
+    fi         
+
+      for NODE in $(seq 1 $NODES)
+        do
+            container_name="ml$NODE.engrlab.marklogic.com"
+            CMD="docker run --privileged -d --network=docker-network --hostname=$container_name --name=$container_name"
+            
+          if  [ -d "/project/engineering" ]; then
+            CMD="$CMD -v /project/engineering:/project/engineering"
+          fi
+          if [ "$SAME_PORTS" == true ] && [ $NODE -eq 1 ]; then
+            CMD="$CMD -p 8000-8003:8000-8003 -p 8050:8050 -p 8055:8055 -p 6321:6321 -p 5073:5073 -p 5275:5275"
+          else         
+            PORT_8000="8000"
+            PORT_8003="8003"
+            CMD="$CMD -p $NODE$PORT_8000-$NODE$PORT_8003:8000-8003"  
+          fi
+           
+          if [ "$QA_PATH" != "" ]; then
+              CMD="$CMD -v $QA_PATH:$QA_PATH"
+          fi
+
+          if [ "$QA_CONTAINER" == true ]; then
+              CMD="$CMD --volumes-from qa_home_trunk"
+          fi
+ 
+          if [ "$MOUNT_HOME" == true ]; then
+              CMD="$CMD -v $HOME:/home/$(whoami) "
+          fi
+
+          CMD="$CMD $IMAGE_NAME"
+          #echo "$CMD"
+          eval $CMD              
+          sleep 3              
+          if [ $NODE -eq 1 ]; then
+            echo "Initializing BOOTSTRAP node ml1.engrlab.marklogic.com"
+            docker exec -it $container_name init-marklogic
+          else
+            echo "adding node ml$NODE to ml1.engrlab.marklogic.com cluster"
+            docker exec -it ml1.engrlab.marklogic.com bash -c "ssh-keyscan -H $container_name >> /home/docker-user/.ssh/known_hosts"
+            docker exec -it ml1.engrlab.marklogic.com bash -c "ssh-keyscan -H ml$NODE >> /home/docker-user/.ssh/known_hosts"
+            docker exec -it $container_name create-cluster ml1.engrlab.marklogic.com
+            sleep 2
+            fi
+        done
+ 
+    # setup qa after cluster is created
+    if [ "$SETUP_QA"  == true ]; then
+      # make setup-qa.sh part of image
+      docker exec -it ml1.engrlab.marklogic.com setup-qa
+    fi
+
+    if [ "$SETUP_QA"  == true ] && [ "$QA_PATH" != "" ] ; then
+      docker exec -it -u docker-user ml1.engrlab.marklogic.com bash -c "cd $QA_PATH && make tests tname=foo"
+    fi
+
+
+    #if [ "$MOUNT_HOME" == true ]; then
+      # make setup-qa.sh part of image
+     # docker exec -it $container_name qa-user-setup $(whaomi)
+    #fi
+    echo "Cluster of $NODES nodes is created successfully, check at http://$(hostname):18001"
+  else 
+    echo "Error:Invalid number of nodes in cluster - $NODES"
+  fi
+}
+
+join-cluster(){
+	docker exec -it $2 create-cluster $1
+}
+
+remove-cluster(){
+	for NODE in $(seq 1 $1)
+    do
+      docker rm -fv ml$NODE.engrlab.marklogic.com
+    done
+    echo "Cluster removed successfully"
+}
+
+remove-all-containers(){
+
+	read -p "Do you want to remove all containers yes/no (This can't be undone)? " remove_container
+	if [ $remove_container == 'yes' ]; then
+  		docker rm -fv $(docker ps -a -q)
+	elif [ $remove_container == 'no' ]; then
+  		echo "Containers are not removed"
+	else
+  		echo "Enter yes or no"
+	fi
+
+}
+
+enter-container(){
+	docker exec -ti -u docker-user $1 /bin/bash
+}
+
+remove-container(){
+	docker rm -fv $1
+}
+
+remove-image(){
+	docker rmi $1
+}
+
+search-registry(){
+	echo "User: $(whoami)"
+	curl -k --fail --silent --show-error --user $(whoami) "https://mlregistry.marklogic.com/v2/_catalog" | awk '{ORS=(NR%2?FS:RS)}1'	
+}
+
+list-containers(){
+	docker ps -a --format "table {{.ID}}\t{{.Names}}\t{{.Image}}"
+}
+
+list-containers-ip(){
+	echo -e "IP Address\thostname"	
+	docker ps -q | xargs -n 1 docker inspect --format '{{ .NetworkSettings.IPAddress }} {{.Config.Hostname}}' | sed 's/ \// /'
+}
+
+list-images(){
+	docker images --format "table {{.ID}}\t{{.Repository}}\t{{.Size}}\t{{.Tag}}\t{{.CreatedAt}}"
+}
+
+docker-clean(){
+	docker rmi $(docker images -f "dangling=true" -q) && docker rmi $(docker images | grep "^<none>" | awk "{print $3}")
+}
+
+
+OS=`uname -s`
+
+if [ "$OS" = "Linux" ]; then
+ PS=/bin/ps
+ SED=/bin/sed
+ AWK=/usr/bin/awk
+ LSOF=/usr/sbin/lsof
+ SYSCTL=/sbin/sysctl
+ SYNC=/bin/sync
+ IPTABLES=/sbin/iptables
+elif [ "$OS" = "SunOS" ]; then
+ PS=/usr/ucb/ps
+ SED=/usr/ucb/sed
+ AWK=/usr/bin/awk
+ LSOF=/usr/local/bin/lsof
+ SYSCTL=/sbin/sysctl
+ SYNC=/bin/sync
+ IPTABLES=/sbin/iptables
+elif [ "$OS" = "Darwin" ]; then
+ PS=/bin/ps
+ SED=/usr/bin/sed
+ AWK=/usr/bin/awk
+ LSOF=/usr/sbin/lsof
+ SYSCTL=/usr/sbin/sysctl
+ SYNC=/bin/sync
+ IPTABLES=/sbin/iptables
+fi
+
+PROG=$0
+
+# To Support 2.2-x branch
+if [[ -n "$1" && "$1" = "install" ]]; then
+ pkg=$2
+ version=$3
+elif [[ -n "$1" && "$1" = "slink" ]]; then
+ version=$3
+elif [[ -n "$1" && "$1" = "copy" ]]; then
+ version=$4
+elif [[ -n "$1" && "$1" = "setupperms" ]]; then
+ if [[ $# -eq 3 ]]; then 
+  version=$3 
+ elif [[ $# -eq 2 && $2 = "b2_2" ]]; then 
+  version=$2 
+ fi
+elif [[ -n "$1" && "$1" = "add-javahome" ]]; then
+  if [[ $# -ne 2 ]]; then 
+   echo "path for JAVA_HOME is needed "
+   exit 1
+  else 
+    value=$2
+  fi
+elif [[ -n "$1" && "$1" = "install-sql" ]]; then
+ pkg=$2
+else
+ version=$2
+fi
+
+if [ "$version" = "b2_2" ]; then
+ MLServer=MarkCIS
+ if [ "$OS" = "Linux" ]; then
+  ML=MarkCIS
+  MLHome=/opt/MarkCIS
+  MLDHome=/var/opt/MarkCIS
+ elif [ "$OS" = "SunOS" ]; then
+  ML=MARKcis
+  MLHome=/opt/MARKcis
+  MLDHome=/var/opt/MARKcis
+ fi
+else
+ MLServer=MarkLogic
+ if [ "$OS" = "Linux" ]; then
+  ML=MarkLogic
+  MLSQL=mlsqlodbc
+  MLHome=/opt/MarkLogic
+  MLDHome=/var/opt/MarkLogic
+ elif [ "$OS" = "SunOS" ]; then
+  ML=MARKlogic
+  MLHome=/opt/MARKlogic
+  MLDHome=/var/opt/MARKlogic
+ elif [ "$OS" = "Darwin" ]; then
+  ML=MarkLogic
+  MLHome=~/Library/MarkLogic
+  MLDHome=~/Library/Application\ Support/MarkLogic/Data
+ fi
+fi
+
+# See how we were called.
+case "$1" in
+  start)
+	start
+	;;
+  stop)
+	stop
+	;;
+  restart)
+	restart
+	;;
+  abort)
+	abort
+	;;
+  status)
+	status
+	;;
+  remove)
+	stop
+	remove
+	;;
+  install)
+	stop
+	remove
+	install
+	setupperms qa
+	;;
+  remove-sql)
+	remove-sql
+	;;
+  install-sql)
+	install-sql
+	;;
+  add-javahome)
+	add-javahome
+	;;
+  remove-javahome)
+        remove-javahome
+        ;;
+  cleandata)
+	stop
+	cleandata
+	;;
+  removedata)
+	stop
+	removedata
+	;;
+  cleanmodules)
+	cleanmodules
+	;;
+  setupperms)
+	grp=$2
+	if [ "$grp" = "" ]; then
+	    grp="qa"
+	fi
+	setupperms $grp
+	;;
+  copy)
+	stop
+	copy $2 $3
+	;;
+  killprocs)
+	killprocs $*
+	;;
+  clearcache)
+        clearSystemCache
+        ;;
+  pauseprocs)
+	pauseprocs
+	;;
+  resumeprocs)
+	resumeprocs
+	;;
+  deny-xdqp)
+	deny-xdqp
+	;;
+  allow-xdqp)
+	allow-xdqp
+	;;
+  show-iptables)
+	show-iptables
+	;;
+  edit-cron)
+	edit-cron
+	;;
+  show-cron)
+	show-cron
+	;;
+  lsof)
+	lsof
+	;;
+  slink)
+	stop
+	slink $2
+	;;
+  replacemotd)
+	replacemotd $2
+	;;
+  pstack)
+	pstack
+	;;
+  pmap)
+	pmap
+	;;
+  delete)
+	for i in $2
+	do
+	 delete $i
+	done
+	;;
+  update-hadoop-env)
+	update-hadoop-env $2 $3
+	;;
+  recover-hadoop-env)
+	recover-hadoop-env $2 $3
+	;;
+  hdp-start)
+	hdp-start $2 $3
+	;;
+  hdp-stop)
+	hdp-stop $2 $3
+	;;
+  change-sysdate)
+	change-sysdate
+	;;
+  sync-sysdate)
+	sync-sysdate
+	;;
+	  get-image)
+  	get-image $2
+  	;;
+  enter-container)
+   enter-container $2
+    ;;
+  remove-container)
+   remove-container $2
+    ;;
+  remove-image)
+   remove-image $2
+    ;;
+  pull-qa-image)
+   pull-qa-image
+    ;;
+  search-registry)
+   search-registry $2
+    ;;
+  list-containers)
+   list-containers
+    ;;
+  list-images)
+   list-images
+    ;;
+  docker-clean)
+   docker-clean
+    ;;
+  remove-all-containers)
+    remove-all-containers
+    ;;
+  remove-cluster)
+    remove-cluster $2
+    ;;		
+  list-containers-ip)
+    list-containers-ip
+    ;;
+  update-cert)
+    update-cert
+    ;;
+  install-docker)
+    install-docker
+    ;;
+  create-cluster)
+   create-cluster $2 $3 $4 $5 $6 $7 $8
+    ;;
+  create-container)
+   create-container $2 $3 $4 $5 $6 $7
+    ;;
+  join-cluster)
+   join-cluster $2 $3
+    ;;
+  *)
+	echo "Usage: $PROG {start|stop|restart|abort|status|remove|install|cleandata|removedata|cleanmodules|setupperms|copy|killprocs|clearcache|pauseprocs|resumeprocs|deny-xdqp|allow-xdqp|show-iptables|edit-cron|show-cron|lsof|slink|replacemotd|pstack|pmap|delete|update-hadoop-env|recover-hadoop-env|hdp-start|hdp-stop|install-sql|remove-sql|add-javahome|remove-javahome}"
+	echo ""
+	echo "   start:        Starts Mark Logic server"
+	echo "   stop:         Stops Mark Logic server"
+	echo "   restart:      Restarts Mark Logic server"
+	echo "   abort:        Abort Mark Logic server"
+	echo "   status:       Prints status of Mark Logic server"
+	echo "   remove:       Uninstalls Mark Logic server"
+	echo "   install:      Installs Mark Logic server"
+	echo "                      $PROG install /tmp/marklogic.rpm"
+	echo "   cleandata:    Clears Mark Logic server data directory"
+	echo "   removedata:   Deletes Mark Logic server data directory"
+	echo "   cleanmodules: Removes data from server modules directories"
+	echo "   setupperms:   Sets permissions on server and data directories"
+	echo "                      $PROG setupperms [group]"
+	echo "                      [group] defaults to qa if not given"
+	echo "   copy:         Copy updated server config file to server data directory"
+	echo "                      $PROG copy /tmp/databases.xml $MLDHome/databases.xml"
+	echo "   killprocs:    Kill Mark Logic processes, if \"stop\" command unable to do so"
+	echo "                 $PROG killprocs"
+	echo "                 $PROG killprocs <ID> : killprocs will kill process id, if owned by daemon"
+        echo "   clearcache:   clean the system level cache"
+	echo "   pauseprocs:   Pause Mark Logic process owned by daemon"
+	echo "   resumeprocs:  Resume Mark Logic process owned by daemon"
+	echo "   deny-xdqp:    Deny all incoming and outgoing XDQP traffic"
+	echo "   allow-xdqp:   This is to be used after deny-xdqp to reallow all XDQP traffic."
+	echo "   show-iptables:This is to see all iptables firewall rules - typically to check if there are any stale drops for xdqp."
+	echo "   edit-cron:    Edit crontab for builder"
+	echo "   show-cron:    This is to see cronjobs for users recently logged in remotely to this machine"
+	echo "   lsof:         List files opened by Mark Logic Processes"
+	echo "   slink:        Move data directory($MLDHome) to different location and create soft link"
+	echo "                      $PROG slink /space"
+	echo "   replacemotd:  replace /etc/motd file"
+	echo "                      $PROG replacemotd /tmp/motd"
+	echo "   pstack:       Print stack trace of Mark Logic Processes"
+	echo "   pmap:         Report memory map of Mark Logic Processes"
+	echo "   delete:       Delete specified dir or file, if owned by daemon"
+	echo "                      $PROG delete /space/Forests/Foo"
+	echo "   update-hadoop-env: Update hadoop-env.sh accross cluster"
+	echo "	                    $PROG update-hadoop-env /space/hdp/utilities /space/hdp/nodes"
+        echo "   recover-hadoop-env: Recover hadoop-env.sh across cluster"
+        echo "                      $PROG recover-hadoop-env /space/hdp/utilities /space/hdp/nodes"
+        echo "   hdp-start: Start HDP(only HDFS and MapReduce)"
+        echo "                      $PROG hdp-start /space/hdp/utility /space/hdp/nodes"
+        echo "   hdp-stop: Stop HDP(only HDFS and MapReduce)"
+        echo "                      $PROG hdp-stop /space/hdp/utility /space/hdp/nodes"
+	echo "   remove-sql:   Uninstalls MarkLogic SQL client"
+	echo "   install-sql:  Installs MarkLogic SQL client"
+	echo "                      $PROG install-sql /tmp/mlsqlodbc.rpm"
+	echo "   add-javahome:  Add JAVA_HOME path in /etc/marklogic.conf"
+	echo "                      $PROG add-javahome <PATH>"
+	echo "   remove-javahome:  remove JAVA_HOME from /etc/marklogic.conf"
+	echo "                      $PROG remove-javahome"
+	echo "   search-registry:   Search registry for available images (mlregistry)"
+	echo "   list-images:	List all images"
+	echo "   list-containers:	List all containers"
+	echo "   list-containers-ip: 	List container hostname and IPs"
+	echo "   get-image:	Pull image from mlregistry"
+	echo "   pull-qa-image: Pull QA_HOME from mlregistry"
+	echo "   create-container:  Creates container from image"
+	echo "   create-cluster:    Create cluster of containers from image"
+	echo "   join-cluster:    Create cluster of already created containers"
+	echo "   enter-container:   Enter inside container"
+	echo "   remove-container:   Removes container"
+	echo "   remove-all-containers:   Removes all containers"
+	echo "   remove-image:     Removes image"
+	echo "   docker-clean:    Removes untagged/dangling images"
+	echo "** To run these commands against Mark Logic 2.x server, last arg to mladmin should be 'b2_2' **"
+	echo ""
+	exit 1
+esac
+
+exit $RETVAL

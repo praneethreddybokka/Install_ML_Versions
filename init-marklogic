@@ -1,0 +1,8 @@
+echo "Wait initializing MarkLogic..."
+mladmin start &&
+sleep 3 &&
+curl -i -X POST -H "Content-type:application/x-www-form-urlencoded" --data-urlencode "license-key=388D-6F4C-70EB-EEB5-D9D6-F6B7-CDBE-E9AF-6D7C-E38F-5CF6-E74F-BFE5-8F0C-72E3-3FD9-F2D7-8EB2-F9BF-6C74-EB7F-9DFE-E78F-F5DE-0010" --data-urlencode "licensee=MarkLogic - Version 8 QA Test License" http://127.0.0.1:8001/admin/v1/init &&
+sleep 5 &&
+curl -X GET http://127.0.0.1:8001/admin/v1/timestamp
+curl -i -X POST --data "admin-username=admin&admin-password=admin" http://127.0.0.1:8001/admin/v1/instance-admin
+echo "MarkLogic initialized successfully..."
