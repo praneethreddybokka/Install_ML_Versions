@@ -27,7 +27,7 @@ fi
 
 
 
-wget --auth-no-challenge --no-check-certificate  ${URL}/${package} --directory-prefix= .
+wget --auth-no-challenge --no-check-certificate  ${URL}/${package} --directory-prefix= . >/dev/null 2>&1
 
 if [ ! -f "./$package" ]
         then
@@ -71,28 +71,34 @@ fi
 echo -e "Completed Pre-req's... Proceeding with Image Creation....\n"
 #Image_name="Marklogic-$1:`date +%H:%M:%S`"
 Image_name="marklogic-$1"
-echo "Building docker Image:$Image_name"
+container_name="$Image_name-container"
+
+
+containter_status=$(sudo docker ps -a | grep $container_name | wc -l)
+if [ "$containter_status" == "1" ] ; then
+        echo "Stopping and removing the previous container"
+        sudo docker stop $container_name
+        sudo docker rm $container_name
+fi
+
 
 before_image_status=$(sudo docker images| grep $Image_name | wc -l)
 if [ $before_image_status  == "1" ] ; then\
 	echo "Status for before_image_status:$before_image_status"
 	echo "This Docker Image was already installed. So removing previous image:$before_image_status"
-	`sudo docker rmi $Image_name`
+	sudo docker rmi $Image_name
 else 
 	echo "Status for before_image_status:$before_image_status"
 	echo "No Image with name $Image_name. So proceeding with creating a new one"
 fi
 
 
-
+echo "Building docker Image:$Image_name"
 Image_output=$(sudo docker build -t $Image_name .)
-
 echo "----->Image creation completed from docker command"
-
 echo "----->Verifying that the image is created"
 
 image_status=$(sudo docker images| grep $Image_name | wc -l)
-
 if [ $image_status  == "1" ] ; then
 	echo "$image_status"
 	echo "Docker Image is created"
@@ -103,17 +109,8 @@ else
 	exit 1;
 fi
 
-container_name="$Image_name-container"
+
 echo -e "\n----->Creating containers for the images created:$container_name"
-containter_status=$(sudo docker ps -a | grep $container_name | wc -l)
-
-if [ "$containter_status" == "1" ] ; then
-	echo "Stopping and removing the previous container"
-	sudo docker stop $container_name
-	sudo docker rm $container_name
-fi
-
-
 Container_output=$(sudo docker run -d --name=$container_name -p $p1:8000 -p $p2:8001 $Image_name)
 if [ "$?" == "0" ] ; then
         echo "Container is created"
