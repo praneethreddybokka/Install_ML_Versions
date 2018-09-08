@@ -1,15 +1,15 @@
 #URL=http://jenkins1.marklogic.com/view/Server%20Builds/job/ServerBuild_xdmp-trunk_build_linux64/lastSuccessfulBuild/artifact/xdmp/src/
 echo "----->Initiating Marklogic RPM download"
 
-if [[ "$1" == "8.0" ]]; then
+if [[ "$1" == "8" ]]; then
 	URL=http://jenkins1.marklogic.com/view/Server%20Builds/job/ServerBuild_b8_0_linux64/lastSuccessfulBuild/artifact/xdmp/src/
 	p1=2000
 	p2=2001
-elif [ "$1" == "9.0" ]; then
+elif [ "$1" == "9" ]; then
         URL=http://jenkins1.marklogic.com/view/Server%20Builds/job/ServerBuild_b90_build_linux64/lastSuccessfulBuild/artifact/xdmp/src/
 	p1=3000
 	p2=3001
-else [[ "$1" == "10.0" ]]
+else [[ "$1" == "10" ]]
         URL=http://jenkins1.marklogic.com/view/Server%20Builds/job/ServerBuild_xdmp-trunk_build_linux64/lastSuccessfulBuild/artifact/xdmp/src/
 	p1=4000
 	p2=4001
